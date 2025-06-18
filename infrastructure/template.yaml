@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Demo infrastructure for LocalStack presentation
+
+Resources:
+  # DynamoDB table to store metadata about created files
+  # Uses a composite key of filePath (hash) and createdAt (range)
+  DemoTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: demo-files-registry
+      AttributeDefinitions:
+        - AttributeName: filePath
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: filePath
+          KeyType: HASH
+        - AttributeName: createdAt
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  # S3 bucket to store the generated files
+  DemoBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: demo-files-bucket
+
+  # IAM role for the Lambda function with permissions to:
+  # - Write files to S3
+  # - Write records to DynamoDB
+  # - Create CloudWatch logs
+  DemoLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub ${DemoBucket.Arn}/*
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt DemoTable.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  # Lambda function that creates timestamped files
+  # and records their metadata in DynamoDB
+  DemoLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: demo-file-creator
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt DemoLambdaRole.Arn
+      Code:
+        S3Bucket: lambda-code-bucket
+        S3Key: lambda/function.zip
+      Timeout: 30
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref DemoBucket
+          TABLE_NAME: !Ref DemoTable
+
+  # EventBridge rule to trigger the Lambda every 5 minutes
+  DemoLambdaScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: demo-lambda-schedule
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets:
+        - Id: DemoLambdaTarget
+          Arn: !GetAtt DemoLambda.Arn
+
+  # Permission for EventBridge to invoke the Lambda
+  DemoLambdaSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DemoLambda
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DemoLambdaScheduleRule.Arn

@@ -1,0 +1,34 @@
+services:
+  localstack:
+    # Container name for easy reference in docker commands
+    container_name: localstack-demo
+    # Using a specific version of LocalStack for stability
+    image: localstack/localstack:4.5.0
+    ports:
+      # The main endpoint for all AWS services in LocalStack
+      - "4566:4566"
+    environment:
+      # Required: Docker socket access for Lambda execution
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      # Required: List of AWS services to enable
+      # - s3: for storing files
+      # - lambda: for serverless functions
+      # - dynamodb: for NoSQL database
+      # - cloudformation: for infrastructure as code
+      # - logs: for CloudWatch logs
+      # - events: for EventBridge scheduling
+      # - iam: for roles and permissions
+      - SERVICES=s3,lambda,dynamodb,cloudformation,logs,events,iam
+    volumes:
+      # Mount our infrastructure code inside the container
+      - ./infrastructure:/infrastructure
+      # Required: Docker socket for Lambda functionality
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      # Mount our initialization script that sets up all resources
+      - ./init-localstack.sh:/etc/localstack/init/ready.d/init-localstack.sh
+    # Ensure LocalStack's main endpoint is responding before running our init script
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
